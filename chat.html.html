@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Private Chat</title>
+  <link rel="manifest" href="./manifest.json">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #efeae2; height: 100vh; }
+    #login-screen {
+      min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center;
+      background: linear-gradient(160deg, #1a1a1a, #c8102e); color: white; padding: 24px; text-align: center;
+    }
+    #login-screen h2 { font-size: 28px; margin-bottom: 8px; }
+    #login-screen p { opacity: .85; margin-bottom: 22px; }
+    #login-screen input {
+      width: 100%; max-width: 320px; padding: 14px 16px; border: none; border-radius: 12px;
+      font-size: 16px; margin-bottom: 12px; text-align: center;
+    }
+    #login-screen button, #send-btn { background: #c8102e; color: white; border: none; border-radius: 12px; font-weight: 700; cursor: pointer; }
+    #login-screen button { padding: 13px 28px; font-size: 16px; }
+    #chat-container { display: none; height: 100vh; flex-direction: column; }
+    header { background: #1a1a1a; color: white; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    header strong { font-size: 17px; }
+    header span { display: block; font-size: 12px; opacity: .7; font-weight: 400; }
+    header button { background: transparent; color: white; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 7px 10px; }
+    #chat-box { flex: 1; overflow-y: auto; padding: 16px 12px 8px; display: flex; flex-direction: column; gap: 10px; }
+    .message { max-width: 78%; padding: 9px 12px; border-radius: 16px; font-size: 15px; line-height: 1.35; word-wrap: break-word; }
+    .sent { background: #d9fdd3; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .received { background: white; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .name { font-size: 12px; font-weight: 700; color: #c8102e; margin-bottom: 3px; }
+    .edited { font-size: 11px; color: #888; font-style: italic; }
+    .time { font-size: 11px; color: #667; margin-top: 4px; display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+    .del, .edit { border: none; background: transparent; color: #777; font-size: 12px; }
+    img.pic { max-width: 220px; border-radius: 10px; display: block; margin-top: 6px; cursor: zoom-in; }
+    #input-area { display: flex; gap: 8px; padding: 10px; background: #f0f2f5; align-items: center; }
+    #message-input { flex: 1; border: none; border-radius: 22px; padding: 12px 14px; font-size: 16px; outline: none; }
+    #photo-btn, #send-btn { width: 44px; height: 44px; border-radius: 50%; font-size: 18px; }
+    #photo-btn { background: white; border: none; }
+    #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 20; align-items: center; justify-content: center; }
+    #lightbox img { max-width: 96vw; max-height: 90vh; border-radius: 8px; }
+    #lightbox button { position: absolute; top: 16px; right: 16px; background: white; border: none; border-radius: 20px; padding: 8px 12px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div id="login-screen">
+    <h2>Private Chat</h2>
+    <p>Only people with the password can enter.</p>
+    <input id="password-input" type="password" placeholder="Password">
+    <input id="name-input" type="text" placeholder="Your name">
+    <button onclick="checkPassword()">Enter</button>
+  </div>
+  <div id="chat-container">
+    <header>
+      <div><strong>Private Chat</strong><span id="who"></span></div>
+      <button onclick="enableNotes()">Alerts</button>
+    </header>
+    <div id="chat-box"></div>
+    <div id="input-area">
+      <button id="photo-btn" onclick="document.getElementById('file').click()">＋</button>
+      <input id="file" type="file" accept="image/*" hidden>
+      <input id="message-input" placeholder="Message">
+      <button id="send-btn">➤</button>
+    </div>
+  </div>
+  <div id="lightbox" onclick="closePic(event)">
+    <button onclick="closePic()">Close</button>
+    <img id="big" alt="">
+  </div>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
+  <script>
+    const CHAT_PASSWORD = "amber123";
+    const firebaseConfig = {
+      apiKey: "AIzaSyBLxvT7qQpZNG9a_oDHKdhlUlHu0UoYxZE",
+      authDomain: "privatechat-d07cc.firebaseapp.com",
+      databaseURL: "https://privatechat-d07cc-default-rtdb.firebaseio.com",
+      projectId: "privatechat-d07cc",
+      storageBucket: "privatechat-d07cc.firebasestorage.app",
+      messagingSenderId: "1001843094093",
+      appId: "1:1001843094093:web:406588f476808a1deba204"
+    };
+    let userName = "", messagesRef, ready = false;
+    function checkPassword() {
+      if (document.getElementById("password-input").value !== CHAT_PASSWORD) { alert("Wrong password"); return; }
+      userName = document.getElementById("name-input").value.trim() || "Guest";
+      document.getElementById("login-screen").style.display = "none";
+      document.getElementById("chat-container").style.display = "flex";
+      document.getElementById("who").textContent = "Signed in as " + userName;
+      startChat();
+    }
+    function enableNotes() {
+      if (!("Notification" in window)) { alert("This phone cannot show alerts."); return; }
+      Notification.requestPermission().then(async (p) => {
+        if (p !== "granted") { alert("Alerts were blocked."); return; }
+        try {
+          const reg = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+          const messaging = firebase.messaging();
+          const token = await messaging.getToken({
+            vapidKey: "BAD7jJgU35VN7tJxiuw7zmHGRwyWqAD-e6ghhjKfHDRARlV-7tKp9s_fiLFyIMrqsEJdxw-j_7H0ASWle8YFzig",
+            serviceWorkerRegistration: reg
+          });
+          if (token) firebase.database().ref("tokens/" + userName).set(token);
+          alert("Alerts are allowed on this phone. Add the chat to your Home Screen, then open it from the icon.");
+        } catch (err) {
+          alert("Alerts are allowed, but closed-app alerts still need the chat added to the Home Screen.");
+        }
+      });
+    }
+    function startChat() {
+      firebase.initializeApp(firebaseConfig);
+      messagesRef = firebase.database().ref("room2");
+      const chatBox = document.getElementById("chat-box");
+      const messageInput = document.getElementById("message-input");
+      document.getElementById("send-btn").onclick = sendText;
+      messageInput.onkeypress = (e) => { if (e.key === "Enter") sendText(); };
+      document.getElementById("file").onchange = sendPhoto;
+      messagesRef.on("child_added", (snap) => draw(snap.key, snap.val(), true));
+      messagesRef.on("child_changed", (snap) => draw(snap.key, snap.val(), false));
+      messagesRef.on("child_removed", (snap) => { const el = document.getElementById("m-" + snap.key); if (el) el.remove(); });
+      setTimeout(() => ready = true, 1200);
+      function draw(key, data, isNew) {
+        let div = document.getElementById("m-" + key);
+        const mine = data.name === userName;
+        if (!div) { div = document.createElement("div"); div.id = "m-" + key; chatBox.appendChild(div); }
+        div.className = "message " + (mine ? "sent" : "received");
+        const time = new Date(data.timestamp || Date.now()).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+        div.innerHTML = `<div class="name">${escapeHtml(data.name || "")}</div>` +
+          (data.text ? `<div>${escapeHtml(data.text)}</div>` : "") +
+          (data.image ? `<img class="pic" src="${data.image}" onclick="openPic(this.src)">` : "") +
+          (data.edited ? `<div class="edited">edited</div>` : "") +
+          `<div class="time"><span>${time}</span>` +
+          (mine && data.text ? `<button class="edit" data-key="${key}">Edit</button>` : "") +
+          (mine ? `<button class="del" data-key="${key}">Delete</button>` : "") + `</div>`;
+        const edit = div.querySelector(".edit");
+        const del = div.querySelector(".del");
+        if (edit) edit.onclick = () => editMsg(key, data.text);
+        if (del) del.onclick = () => messagesRef.child(key).remove();
+        chatBox.scrollTop = chatBox.scrollHeight;
+        if (ready && isNew && data.name !== userName) notify(data);
+      }
+    }
+    function notify(data) {
+      const title = data.name || "New message";
+      const body = data.text || "Sent a picture";
+      document.title = "New message";
+      setTimeout(() => document.title = "Private Chat", 2500);
+      if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+        new Notification(title, { body });
+      }
+    }
+    function sendText() {
+      const input = document.getElementById("message-input");
+      const text = input.value.trim();
+      if (!text) return;
+      messagesRef.push({ name: userName, text, timestamp: Date.now() });
+      input.value = "";
+    }
+    function editMsg(key, oldText) {
+      const next = prompt("Edit message", oldText);
+      if (next === null) return;
+      const text = next.trim();
+      if (!text) return;
+      messagesRef.child(key).update({ text, edited: true });
+    }
+    function sendPhoto(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const scale = Math.min(1, 700 / img.width);
+          canvas.width = Math.max(1, img.width * scale);
+          canvas.height = Math.max(1, img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          messagesRef.push({ name: userName, image: canvas.toDataURL("image/jpeg", 0.6), timestamp: Date.now() });
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+      e.target.value = "";
+    }
+    function openPic(src) {
+      document.getElementById("big").src = src;
+      document.getElementById("lightbox").style.display = "flex";
+    }
+    function closePic(e) {
+      if (e && e.target && e.target.id === "big") return;
+      document.getElementById("lightbox").style.display = "none";
+    }
+    function escapeHtml(s) { return String(s).replace(/[&<>]/g, (c) => ({"&":"&","<":"<",">":">"}[c])); }
+  </script>
+</body>
+</html>
